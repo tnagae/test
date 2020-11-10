@@ -1,1 +1,206 @@
-# test
+# cloud_formation_test
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  DBInstanceClass:
+    Default: db.t2.micro
+    Description: DB instance class
+    Type: String
+    ConstraintDescription: Must select a valid DB instance type.
+  DBAllocatedStorage:
+    Default: '20'
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+    ConstraintDescription: must be between 20 and 65536 GiB.
+  DBPort:
+    Default: 3306
+    Description: TCP/IP port for the database
+    Type: Number
+    MinValue: 1150
+    MaxValue: 65535
+  DBName:
+    Default: tweetapp2production
+    Description: My database
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    Description: Default is t2.micro.
+  KeyName:
+    Description: Amazon EC2 Key Pair
+    Type: "AWS::EC2::KeyPair::KeyName"
+Mappings:
+  RegionMap:
+    ap-northeast-1:
+      "HVM64": "ami-0ce107ae7af2e92b5"
+Resources:
+  VPCfortweetapp2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value: VPC_for_tweetapp2
+  tweetapp2Subnet1a:
+    Type: AWS::EC2::Subnet
+    DependsOn: AttachGateway
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref VPCfortweetapp2
+      Tags:
+      - Key: Name
+        Value: tweetapp2-Subnet-1a
+  tweetapp2Subnet1c:
+    Type: AWS::EC2::Subnet
+    DependsOn: AttachGateway
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref VPCfortweetapp2
+      Tags:
+      - Key: Name
+        Value: tweetapp2-Subnet-1c
+  Gatewayfortweetapp2:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: Gateway_for_tweetapp2
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPCfortweetapp2
+      InternetGatewayId: !Ref Gatewayfortweetapp2
+  Tablefortweetapp2:
+    Type: AWS::EC2::RouteTable
+    DependsOn: AttachGateway
+    Properties:
+      VpcId: !Ref VPCfortweetapp2
+      Tags:
+      - Key: Name
+        Value: Table_for_tweetapp2
+  Route:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref Tablefortweetapp2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Gatewayfortweetapp2
+  SubnetRouteTableAssociation1a:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref tweetapp2Subnet1a
+      RouteTableId: !Ref Tablefortweetapp2
+  SubnetRouteTableAssociation1c:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref tweetapp2Subnet1c
+      RouteTableId: !Ref Tablefortweetapp2
+  VpcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security for tweetapp2
+      GroupName: tweetapp2-SecurityGroup
+      VpcId:
+         Ref: VPCfortweetapp2
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 222.6.63.118/32
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DB Subnet Group for tweetapp2
+      DBSubnetGroupName: tweetapp2DB-Subnet-Group
+      SubnetIds:
+        - !Ref tweetapp2Subnet1a
+        - !Ref tweetapp2Subnet1c
+  Tweetapp2DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: MySQL
+      EngineVersion: 8.0.20
+      #DBインスタンスの名前　DBインスタンス識別子
+      DBInstanceIdentifier: tweetapp2-mysql
+      MasterUsername: mastertomo
+      MasterUserPassword: tomomaster
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref VpcSecurityGroup
+      Port: !Ref DBPort
+      DBName: !Ref DBName
+      DBParameterGroupName: default.mysql8.0
+      OptionGroupName: default:mysql-8-0
+      BackupRetentionPeriod: 1
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+          - "RegionMap"
+          - Ref: "AWS::Region"
+          - "HVM64"
+      InstanceType:
+        Ref: InstanceTypeParameter
+      SubnetId: !Ref tweetapp2Subnet1a
+      InstanceInitiatedShutdownBehavior: stop
+      Tenancy: default
+      Tags:
+        - Key: "Name"
+          Value: "tweetapp2-instance"
+      SecurityGroupIds:
+        - !Ref VpcSecurityGroup
+      KeyName:
+        Ref: KeyName
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Name: Tweetapp2-ELB
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref tweetapp2Subnet1a
+        - !Ref tweetapp2Subnet1c
+      Tags:
+        - Key: Name
+          Value: tweetapp2-Webserver
+      SecurityGroups:
+        - !Ref VpcSecurityGroup
+  ELBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: tweetapp2-Target-Group
+      TargetType: instance
+      Protocol: HTTP
+      Port: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 10
+      Matcher:
+        HttpCode: '200'
+      Targets:
+        - Id: !Ref EC2Instance
+          Port: 80
+      VpcId: !Ref VPCfortweetapp2
